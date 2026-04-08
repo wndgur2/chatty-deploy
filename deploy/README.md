@@ -1,64 +1,88 @@
 # Chatty Docker deployment (macOS-oriented)
 
-Stack: **MySQL**, **Nest backend**, **nginx** (static SPA + reverse proxy to API, `/socket.io`, and `/assets`).
+This guide runs Chatty with Docker Compose using:
 
-## Prerequisites
+- `mysql`: MySQL 8
+- `backend`: NestJS API + WebSocket server
+- `nginx`: serves built frontend and proxies `/api`, `/socket.io`, and `/assets`
 
-- Docker Desktop for Mac (or compatible engine).
-- **Ollama** running on the Mac host (recommended) so the backend can call `http://host.docker.internal:11434`. Pull the models you configure in `OLLAMA_*`.
+## 1) Prerequisites
 
-## Quick start
+- Docker Desktop for Mac (or another compatible Docker engine).
+- Ollama running on the host machine so containers can reach `http://host.docker.internal:11434`.
+- Required Ollama models pulled locally (`OLLAMA_CHAT_MODEL`, `OLLAMA_EVAL_MODEL`).
 
-1. Copy env template and edit secrets:
+## 2) Configure environment
 
-   ```bash
-   cp .env.docker.example .env
-   ```
+From the project root:
 
-2. The default published port is **8080** (`HTTP_PORT=8080`). If you change the port or hostname, set `PUBLIC_ORIGIN` and `CORS_ORIGIN` to the URL you open in the browser (for example `http://127.0.0.1:3000` and `HTTP_PORT=3000`). Rebuild nginx after changing `PUBLIC_*` or `VITE_*` vars (they are compile-time for the SPA).
+```bash
+cp .env.docker.example .env
+```
 
-3. Build and run:
+Update values in `.env` before first run:
 
-   ```bash
-   docker compose up --build
-   ```
+- `JWT_SECRET` should be changed from the default placeholder.
+- `PUBLIC_ORIGIN` and `CORS_ORIGIN` should match the browser URL you will use.
+- `HTTP_PORT` controls host port mapping for nginx (default `8080`).
+- `OLLAMA_HOST` defaults to `http://host.docker.internal:11434` for local Ollama on macOS.
 
-4. Open `PUBLIC_ORIGIN` in the browser (default `http://localhost:8080`).
+Important behavior notes:
 
-## Smoke tests
+- If you change `PUBLIC_*` or any `VITE_*` variable, rebuild with `docker compose up --build` because frontend values are compile-time.
+- If you expose a different host/port (example: `http://127.0.0.1:3000`), align `PUBLIC_ORIGIN`, `CORS_ORIGIN`, and `HTTP_PORT`.
 
-1. **SPA**: Load the app; confirm the login/register UI renders without console errors (except optional Firebase warnings if keys are unset).
-2. **REST**: Register, log in, list or create chatrooms via the UI (all traffic should go to `/api/...` on the same host).
-3. **WebSocket**: Open a chatroom and send a message; confirm streaming works (Network tab → WS to `/socket.io/`).
-4. **Profile image URL**: Create or update a chatroom with an image; the returned `profileImageUrl` should use your public origin (`http://localhost:8080` or your custom `PUBLIC_ORIGIN`), not an internal Docker hostname.
-5. **Ollama from the backend container** (Node 18+ global `fetch`):
+## 3) Build and run
+
+From the project root:
+
+```bash
+docker compose up --build
+```
+
+Then open `PUBLIC_ORIGIN` in your browser (default `http://localhost:8080`).
+
+## 4) Smoke test checklist
+
+1. **SPA**: app loads and login/register UI renders (optional Firebase warnings are acceptable when Firebase vars are unset).
+2. **REST**: register/login and list/create chatrooms through UI; requests should target `/api/...` on the same host.
+3. **WebSocket**: send a message in a chatroom and confirm streaming via Socket.IO (`/socket.io/`).
+4. **Profile image URL**: create/update chatroom with image and verify returned `profileImageUrl` uses your public origin.
+5. **Ollama reachability from backend container**:
 
    ```bash
    docker compose exec backend node -e "const h=(process.env.OLLAMA_HOST||'http://127.0.0.1:11434').replace(/\/$/,'');fetch(h+'/api/tags').then(r=>r.text()).then(console.log).catch(e=>{console.error(e);process.exit(1);})"
    ```
 
-## Troubleshooting
+## 5) Troubleshooting
 
-### P3009 — failed migration (e.g. old `widen_user_device_token`)
+### Prisma `P3009` failed migration (example: `widen_user_device_token`)
 
-If the DB still has a **failed** row for a migration (from an earlier run) and the backend exits on `migrate deploy`, either:
+If MySQL contains a failed migration row from an earlier attempt and backend exits during `migrate deploy`:
 
-**A. Reset the database** (drops all data):
+Option A: reset database state (destructive; drops all DB data):
 
 ```bash
 docker compose down -v
 docker compose up --build
 ```
 
-**B. Mark the failed migration as rolled back**, then restart the backend (entrypoint runs `migrate deploy` again):
+Option B: mark migration as rolled back, then restart backend:
 
 ```bash
 docker compose exec backend npx prisma migrate resolve --rolled-back 20260408120000_widen_user_device_token
 docker compose restart backend
 ```
 
-## Notes
+### Common origin/port mismatch symptoms
 
-- Uploaded files persist in the `backend_assets` volume (`ASSETS_DIR=/app/assets`).
-- `extra_hosts: host.docker.internal:host-gateway` helps on Linux; on Docker Desktop for Mac it is redundant but harmless.
-- For HTTPS or a custom domain, terminate TLS at nginx (add certs and a `listen 443 ssl` server block) and set `PUBLIC_ORIGIN` / `CORS_ORIGIN` to `https://your.domain`.
+- Browser cannot call API or WebSocket correctly.
+- Profile image URLs point to an unexpected host.
+
+Verify these values are aligned: `PUBLIC_ORIGIN`, `CORS_ORIGIN`, `HTTP_PORT`, and browser URL.
+
+## 6) Operational notes
+
+- Uploaded files persist in Docker volume `backend_assets` (`ASSETS_DIR=/app/assets`).
+- `extra_hosts: host.docker.internal:host-gateway` is mainly for Linux compatibility; harmless on Docker Desktop for Mac.
+- For custom domain or HTTPS, terminate TLS at nginx and set `PUBLIC_ORIGIN` / `CORS_ORIGIN` to the final HTTPS URL.
