@@ -53,7 +53,7 @@ Use this path for a containerized stack (MySQL + backend + nginx-served frontend
 1. Copy env template:
    - `cp .env.docker.example .env`
 2. Build and run:
-   - `docker compose up --build`
+   - `docker compose up -d --build`
 3. Open:
    - `http://localhost:8080` (or your configured `PUBLIC_ORIGIN` / `HTTP_PORT`)
 
